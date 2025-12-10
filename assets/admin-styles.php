@@ -364,14 +364,6 @@ if (!defined('ABSPATH')) exit;
     font-weight: 600;
 }
 
-.ys-table td:nth-child(9):contains("Yes") {
-    color: var(--success-color) !important;
-}
-
-.ys-table td:nth-child(9):contains("No") {
-    color: var(--warning-color) !important;
-}
-
 .ys-danger-content {
     display: flex;
     justify-content: space-between;
