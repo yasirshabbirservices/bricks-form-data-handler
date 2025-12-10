@@ -1,0 +1,6 @@
+<Files *.xml>
+Allow from all
+</Files>
+<Files *.xls>
+Allow from all
+</Files>
