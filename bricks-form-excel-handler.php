@@ -4,7 +4,7 @@
  * Plugin Name: Bricks Form Data Manager
  * Plugin URI: https://yasirshabbir.com
  * Description: Professional form submission handler for Bricks Builder - Saves data to Excel files
- * Version: 2.7.1
+ * Version: 2.8.1
  * Author: Yasir Shabbir
  * Author URI: https://yasirshabbir.com
  * License: GPL v2 or later
@@ -17,14 +17,14 @@ if (!defined('ABSPATH')) exit;
 class Bricks_Form_Data_Manager
 {
     private $data_dir;
-    private $xml_file;
-    private $version = '2.7.1';
+    private $xls_file;
+    private $version = '2.8.1';
 
     public function __construct()
     {
         $upload_dir = wp_upload_dir();
         $this->data_dir = $upload_dir['basedir'] . '/form-data';
-        $this->xml_file = $this->data_dir . '/submissions.xml';
+        $this->xls_file = $this->data_dir . '/submissions.xls';
 
         // Create directory if it doesn't exist
         if (!file_exists($this->data_dir)) {
@@ -71,7 +71,7 @@ class Bricks_Form_Data_Manager
      */
     private function protect_directory()
     {
-        $htaccess_content = "# Protect form submission files\nOrder Deny,Allow\nDeny from all\n<Files *.xml>\nAllow from all\n</Files>\n<Files *.csv>\nAllow from all\n</Files>";
+        $htaccess_content = "# Protect form submission files\nOrder Deny,Allow\nDeny from all\n<Files *.xls>\nAllow from all\n</Files>\n<Files *.xml>\nAllow from all\n</Files>\n<Files *.csv>\nAllow from all\n</Files>";
         file_put_contents($this->data_dir . '/.htaccess', $htaccess_content);
         file_put_contents($this->data_dir . '/index.php', '<?php // Silence is golden');
     }
@@ -161,22 +161,24 @@ class Bricks_Form_Data_Manager
         // Debug: Log final data
         error_log('Final data to save: ' . print_r($data, true));
 
-        $this->save_to_xml($data);
+        $this->save_to_xls($data);
     }
 
     /**
-     * Save data to XML file with duplicate prevention based on email
+     * Save data to XLS file with duplicate prevention based on email
      */
-    private function save_to_xml($data)
+    private function save_to_xls($data)
     {
-        $file_exists = file_exists($this->xml_file);
+        $file_exists = file_exists($this->xls_file);
         $existing_data = array();
         $headers = array();
 
         // Read existing data if file exists
-        if ($file_exists && filesize($this->xml_file) > 0) {
+        if ($file_exists && filesize($this->xls_file) > 0) {
             try {
-                $xml = simplexml_load_file($this->xml_file);
+                // Read the XLS file as XML
+                $xml_content = file_get_contents($this->xls_file);
+                $xml = simplexml_load_string($xml_content);
                 if ($xml && isset($xml->Worksheet->Table->Row)) {
                     $rows = $xml->Worksheet->Table->Row;
 
@@ -200,7 +202,7 @@ class Bricks_Form_Data_Manager
                     }
                 }
             } catch (Exception $e) {
-                error_log('Error reading XML file: ' . $e->getMessage());
+                error_log('Error reading XLS file: ' . $e->getMessage());
                 $existing_data = array();
             }
         } else {
@@ -252,161 +254,150 @@ class Bricks_Form_Data_Manager
             error_log('Added NEW entry for email: ' . $submission_email . ' with entry ID: ' . $data['entry_id']);
         }
 
-        // Write all data back to XML
-        $this->write_xml_file($headers, $existing_data);
+        // Write all data back to XLS
+        $this->write_xls_file($headers, $existing_data);
 
         return true;
     }
 
     /**
-     * Write data to XML file
+     * Write data to XLS (Excel 2003 XML) file - SIMPLIFIED VERSION
      */
-    private function write_xml_file($headers, $data)
+    private function write_xls_file($headers, $data)
     {
-        $xml = new DOMDocument('1.0', 'UTF-8');
-        $xml->formatOutput = true;
+        // Simplified XLS/XML format without unnecessary namespaces
+        $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+$xml .= '
+<?mso-application progid="Excel.Sheet"?>' . "\n";
+$xml .= '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"' . "\n";
+        $xml .= ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' . "\n";
+    $xml .= '<Styles>' . "\n";
+        $xml .= '<Style ss:ID="Default" ss:Name="Normal">
+        ' . "\n";
+$xml .='<Alignment ss:Vertical="Bottom"/>'. "\n";
+        $xml .='<Borders/>'. "\n";
+        $xml .='<Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000"/>'. "\n";
+        $xml .='<Interior/>'. "\n";
+        $xml .='<NumberFormat/>'. "\n";
+        $xml .='<Protection/>'. "\n";
+        $xml .='
+        </Style>' . "\n";
+        $xml .= '<Style ss:ID="Header">
+        ' . "\n";
+$xml .='<Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>'. "\n";
+        $xml .='
+        </Style>' . "\n";
+        $xml .= '</Styles>' . "\n";
 
-        // Create processing instruction for Excel
-        $pi = $xml->createProcessingInstruction('mso-application', 'progid="Excel.Sheet"');
-        $xml->appendChild($pi);
+    // Create Worksheet
+    $xml .= '<Worksheet ss:Name="Form Submissions">' . "\n";
+        $xml .= '<Table>' . "\n";
 
-        // Create Workbook
-        $workbook = $xml->createElement('Workbook');
-        $workbook->setAttribute('xmlns', 'urn:schemas-microsoft-com:office:spreadsheet');
-        $workbook->setAttribute('xmlns:ss', 'urn:schemas-microsoft-com:office:spreadsheet');
-
-        // Create Worksheet
-        $worksheet = $xml->createElement('Worksheet');
-        $worksheet->setAttribute('ss:Name', 'Form Submissions');
-
-        // Create Table
-        $table = $xml->createElement('Table');
-
-        // Add header row
-        $headerRow = $xml->createElement('Row');
-        $headerRow->setAttribute('ss:Index', '1');
-        foreach ($headers as $header) {
-            $cell = $xml->createElement('Cell');
-            $dataElement = $xml->createElement('Data');
-            $dataElement->setAttribute('ss:Type', 'String');
-
-            // Make header bold
-            $bold = $xml->createElement('ss:Bold');
-            $bold->setAttribute('xmlns:ss', 'urn:schemas-microsoft-com:office:spreadsheet');
-            $dataElement->appendChild($bold);
-
-            $dataText = $xml->createTextNode($header);
-            $dataElement->appendChild($dataText);
-            $cell->appendChild($dataElement);
-            $headerRow->appendChild($cell);
-        }
-        $table->appendChild($headerRow);
-
-        // Add data rows
-        $rowIndex = 2;
-        foreach ($data as $row) {
-            $dataRow = $xml->createElement('Row');
-            $dataRow->setAttribute('ss:Index', $rowIndex);
-
-            foreach ($row as $cellValue) {
-                $cell = $xml->createElement('Cell');
-                $dataElement = $xml->createElement('Data');
-                $dataElement->setAttribute('ss:Type', 'String');
-
-                $cellText = $xml->createTextNode(htmlspecialchars($cellValue, ENT_XML1, 'UTF-8'));
-                $dataElement->appendChild($cellText);
-                $cell->appendChild($dataElement);
-                $dataRow->appendChild($cell);
-            }
-
-            $table->appendChild($dataRow);
-            $rowIndex++;
-        }
-
-        $worksheet->appendChild($table);
-        $workbook->appendChild($worksheet);
-        $xml->appendChild($workbook);
-
-        // Save to file
-        $xml->save($this->xml_file);
-        chmod($this->xml_file, 0644);
-
-        error_log('XML file saved successfully with ' . count($data) . ' entries');
-        return true;
-    }
-
-    /**
-     * Add admin menu
-     */
-    public function add_admin_menu()
-    {
-        add_menu_page(
-            'Form Submissions',
-            'Form Data',
-            'view_form_submissions',
-            'form-submissions',
-            array($this, 'admin_page'),
-            'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTQgMkg2QzQuOSAyIDQgMi45IDQgNFYyMEM0IDIxLjEgNC44OSAyMiA1Ljk5IDIySDE4QzE5LjEgMjIgMjAgMjEuMSAyMCAyMFY4TDE0IDJaTTE2IDE4SDhWMTZIOFYxOEgxNlpNMTYgMTRIOFYxMkg4VjE0SDE2Wk0xMyA5VjMuNUwxOC41IDlaIiBmaWxsPSIjMTZlNzkxIi8+PC9zdmc+',
-            30
-        );
-    }
-
-    /**
-     * Admin page
-     */
-    public function admin_page()
-    {
-        $file_exists = file_exists($this->xml_file);
-        $total_submissions = 0;
-        $latest_submission = 'N/A';
-        $file_size = 0;
-
-        if ($file_exists) {
-            try {
-                $xml = simplexml_load_file($this->xml_file);
-                if ($xml && isset($xml->Worksheet->Table->Row)) {
-                    $rows = $xml->Worksheet->Table->Row;
-                    $total_submissions = count($rows) - 1; // Subtract header row
-
-                    if ($total_submissions > 0) {
-                        // Get last row (excluding header)
-                        $lastRow = $rows[count($rows) - 1];
-                        if ($lastRow->Cell[1]->Data) {
-                            $latest_submission = (string)$lastRow->Cell[1]->Data;
-                        }
-                    }
+            // Add header row
+            $xml .= '<Row ss:StyleID="Header">' . "\n";
+                foreach ($headers as $header) {
+                $xml .= '<Cell><Data ss:Type="String">' . htmlspecialchars($header, ENT_XML1, 'UTF-8') . '</Data></Cell>
+                ' . "\n";
                 }
-            } catch (Exception $e) {
-                error_log('Error reading XML file: ' . $e->getMessage());
+                $xml .= '</Row>' . "\n";
+
+            // Add data rows
+            foreach ($data as $row) {
+            $xml .= '<Row>' . "\n";
+                foreach ($row as $cellValue) {
+                $xml .= '<Cell><Data ss:Type="String">' . htmlspecialchars($cellValue, ENT_XML1, 'UTF-8') . '</Data>
+                </Cell>' . "\n";
+                }
+                $xml .= '</Row>' . "\n";
             }
 
-            $file_size = size_format(filesize($this->xml_file));
-        }
+            $xml .= '</Table>' . "\n";
+        $xml .= '</Worksheet>' . "\n";
+    $xml .= '</Workbook>';
 
-        $success_message = '';
-        if (isset($_GET['cleared']) && $_GET['cleared'] == '1') {
-            $success_message = '<div class="ys-alert ys-alert-success">All submissions cleared successfully.</div>';
-        }
+// Save to file
+file_put_contents($this->xls_file, $xml);
+chmod($this->xls_file, 0644);
 
-        $this->render_admin_page(
-            $file_exists,
-            $total_submissions,
-            $latest_submission,
-            $file_size,
-            $success_message
-        );
-    }
+error_log('XLS file saved successfully with ' . count($data) . ' entries');
+return true;
+}
 
-    /**
-     * Render admin page
-     */
-    private function render_admin_page(
-        $file_exists,
-        $total_submissions,
-        $latest_submission,
-        $file_size,
-        $success_message
-    ) {
+/**
+* Add admin menu
+*/
+public function add_admin_menu()
+{
+add_menu_page(
+'Form Submissions',
+'Form Data',
+'view_form_submissions',
+'form-submissions',
+array($this, 'admin_page'),
+'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTQgMkg2QzQuOSAyIDQgMi45IDQgNFYyMEM0IDIxLjEgNC44OSAyMiA1Ljk5IDIySDE4QzE5LjEgMjIgMjAgMjEuMSAyMCAyMFY4TDE0IDJaMTYgMThIOFYxNkg4VjE4SDE2Wk0xNiAxNEg4VjEySDhWMTRIx2Wk0xMyA5VjMuNUwxOC41IDlaIiBmaWxsPSIjMTZlNzkxIi8+PC9zdmc+',
+30
+);
+}
+
+/**
+* Admin page
+*/
+public function admin_page()
+{
+$file_exists = file_exists($this->xls_file);
+$total_submissions = 0;
+$latest_submission = 'N/A';
+$file_size = 0;
+
+if ($file_exists) {
+try {
+// Read XLS file as XML to count rows
+$xml_content = file_get_contents($this->xls_file);
+// Suppress warnings for namespace issues - they don't affect functionality
+$xml = @simplexml_load_string($xml_content);
+if ($xml && isset($xml->Worksheet->Table->Row)) {
+$rows = $xml->Worksheet->Table->Row;
+$total_submissions = count($rows) - 1; // Subtract header row
+
+if ($total_submissions > 0) {
+// Get last row (excluding header)
+$lastRow = $rows[count($rows) - 1];
+if ($lastRow->Cell[1]->Data) {
+$latest_submission = (string)$lastRow->Cell[1]->Data;
+}
+}
+}
+} catch (Exception $e) {
+error_log('Error reading XLS file: ' . $e->getMessage());
+}
+
+$file_size = size_format(filesize($this->xls_file));
+}
+
+$success_message = '';
+if (isset($_GET['cleared']) && $_GET['cleared'] == '1') {
+$success_message = '<div class="ys-alert ys-alert-success">All submissions cleared successfully.</div>';
+}
+
+$this->render_admin_page(
+$file_exists,
+$total_submissions,
+$latest_submission,
+$file_size,
+$success_message
+);
+}
+
+/**
+* Render admin page
+*/
+private function render_admin_page(
+$file_exists,
+$total_submissions,
+$latest_submission,
+$file_size,
+$success_message
+) {
 ?>
 <div class="ys-wrapper">
     <div class="ys-container">
@@ -445,13 +436,13 @@ class Bricks_Form_Data_Manager
             <div class="ys-card-body">
                 <div class="ys-actions-grid">
                     <form method="post" action="">
-                        <?php wp_nonce_field('download_xml', 'download_xml_nonce'); ?>
-                        <input type="hidden" name="action" value="download_xml">
+                        <?php wp_nonce_field('download_xls', 'download_xls_nonce'); ?>
+                        <input type="hidden" name="action" value="download_xls">
                         <button type="submit" class="ys-btn ys-btn-primary">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                                 <path d="M19 9H15V3H9V9H5L12 16L19 9ZM5 18V20H19V18H5Z" fill="currentColor" />
                             </svg>
-                            Download XML File (.xml)
+                            Download Excel File (.xls)
                         </button>
                     </form>
                     <button class="ys-btn ys-btn-secondary" onclick="window.location.reload()">
@@ -545,28 +536,43 @@ class Bricks_Form_Data_Manager
     }
 
     /**
-     * Show data preview from XML
+     * Show data preview from XLS - SIMPLIFIED READING
      */
     private function show_preview()
     {
-        if (!file_exists($this->xml_file)) {
+        if (!file_exists($this->xls_file)) {
             echo '<div class="ys-empty-state" style="padding: 32px;"><p>No submissions to preview.</p></div>';
             return;
         }
 
         try {
-            $xml = simplexml_load_file($this->xml_file);
-            if (!$xml || !isset($xml->Worksheet->Table->Row)) {
-                echo '<div class="ys-empty-state" style="padding: 32px;"><p>No submissions to preview.</p></div>';
-                return;
-            }
+            // Read XLS file content
+            $xml_content = file_get_contents($this->xls_file);
 
-            $rows = $xml->Worksheet->Table->Row;
-            $total_rows = count($rows);
+            // Parse XML using DOMDocument which is more forgiving
+            $dom = new DOMDocument();
+            // Suppress warnings for namespace issues
+            @$dom->loadXML($xml_content);
+
+            $rows = $dom->getElementsByTagName('Row');
+            $total_rows = $rows->length;
 
             if ($total_rows <= 1) { // Only header row
                 echo '<div class="ys-empty-state" style="padding: 32px;"><p>No submissions to preview.</p></div>';
                 return;
+            }
+
+            // Get headers from first row
+            $headers = array();
+            $firstRow = $rows->item(0);
+            if ($firstRow) {
+                $cells = $firstRow->getElementsByTagName('Cell');
+                foreach ($cells as $cell) {
+                    $dataElements = $cell->getElementsByTagName('Data');
+                    if ($dataElements->length > 0) {
+                        $headers[] = $dataElements->item(0)->nodeValue;
+                    }
+                }
             }
 
             // Get last 10 rows (excluding header)
@@ -574,16 +580,10 @@ class Bricks_Form_Data_Manager
             $recent_rows = array();
 
             for ($i = $start; $i < $total_rows; $i++) {
-                $recent_rows[] = $rows[$i];
+                $recent_rows[] = $rows->item($i);
             }
 
             $recent_rows = array_reverse($recent_rows);
-
-            // Get headers from first row
-            $headers = array();
-            foreach ($rows[0]->Cell as $cell) {
-                $headers[] = (string)$cell->Data;
-            }
 
             echo '<table class="ys-table"><thead><tr>';
             foreach ($headers as $header) {
@@ -594,8 +594,13 @@ class Bricks_Form_Data_Manager
             foreach ($recent_rows as $row) {
                 echo '<tr>';
                 $cellIndex = 0;
-                foreach ($row->Cell as $cell) {
-                    $cellValue = (string)$cell->Data;
+                $cells = $row->getElementsByTagName('Cell');
+                foreach ($cells as $cell) {
+                    $dataElements = $cell->getElementsByTagName('Data');
+                    $cellValue = '';
+                    if ($dataElements->length > 0) {
+                        $cellValue = $dataElements->item(0)->nodeValue;
+                    }
 
                     // Apply special styling for consent columns
                     if ($cellIndex == 4) { // Newsletter Consent column
@@ -622,7 +627,7 @@ class Bricks_Form_Data_Manager
             echo '</tbody></table>';
         } catch (Exception $e) {
             echo '<div class="ys-empty-state" style="padding: 32px;"><p>Error reading data file.</p></div>';
-            error_log('Error reading XML for preview: ' . $e->getMessage());
+            error_log('Error reading XLS for preview: ' . $e->getMessage());
         }
     }
 
@@ -631,8 +636,8 @@ class Bricks_Form_Data_Manager
      */
     public function handle_download()
     {
-        if (isset($_POST['action']) && $_POST['action'] == 'download_xml') {
-            if (!isset($_POST['download_xml_nonce']) || !wp_verify_nonce($_POST['download_xml_nonce'], 'download_xml')) {
+        if (isset($_POST['action']) && $_POST['action'] == 'download_xls') {
+            if (!isset($_POST['download_xls_nonce']) || !wp_verify_nonce($_POST['download_xls_nonce'], 'download_xls')) {
                 wp_die('Security check failed');
             }
 
@@ -640,12 +645,12 @@ class Bricks_Form_Data_Manager
                 wp_die('Unauthorized access');
             }
 
-            if (file_exists($this->xml_file)) {
-                header('Content-Type: application/xml');
-                header('Content-Disposition: attachment; filename="form-submissions-' . date('Y-m-d-His') . '.xml"');
+            if (file_exists($this->xls_file)) {
+                header('Content-Type: application/vnd.ms-excel');
+                header('Content-Disposition: attachment; filename="form-submissions-' . date('Y-m-d-His') . '.xls"');
                 header('Pragma: no-cache');
                 header('Expires: 0');
-                readfile($this->xml_file);
+                readfile($this->xls_file);
                 exit;
             }
         }
@@ -659,8 +664,8 @@ class Bricks_Form_Data_Manager
                 wp_die('Unauthorized access');
             }
 
-            if (file_exists($this->xml_file)) {
-                unlink($this->xml_file);
+            if (file_exists($this->xls_file)) {
+                unlink($this->xls_file);
                 wp_redirect(admin_url('admin.php?page=form-submissions&cleared=1'));
                 exit;
             }
