@@ -189,7 +189,7 @@ class Bricks_Form_Data_Manager
 
             // If still no token, generate one (fallback)
             if (empty($data['token'])) {
-                $data['token'] = 'token_' . substr(wp_generate_password(8, false), 0, 8);
+                $data['token'] = substr(wp_generate_password(8, false), 0, 8);
                 error_log('No token found in form fields. Generated fallback token: ' . $data['token']);
             }
         }
