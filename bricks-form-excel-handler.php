@@ -4,7 +4,7 @@
  * Plugin Name: Bricks Form Data Manager
  * Plugin URI: https://yasirshabbir.com
  * Description: Professional form submission handler for Bricks Builder - Saves data to Excel files for multiple forms
- * Version: 2.9.0
+ * Version: 2.11.0
  * Author: Yasir Shabbir
  * Author URI: https://yasirshabbir.com
  * License: GPL v2 or later
@@ -17,13 +17,13 @@ if (!defined('ABSPATH')) exit;
 class Bricks_Form_Data_Manager
 {
     private $data_dir;
-    private $version = '2.9.0';
+    private $version = '2.11.0';
 
     // Form configurations - Map form IDs to their respective XLS files
     private $form_configs = array(
         // Original forms (page 1)
-        'rwffis' => 'submissions.xls', // New Entry Form (original)
-        'xaiama' => 'submissions.xls', // Update Entry Form (original)
+        'rwffis' => 'motodinamiki.xls', // New Entry Form (original)
+        'xaiama' => 'motodinamiki.xls', // Update Entry Form (original)
 
         // New forms (page 2)
         'dfejuq' => 'motodiktio.xls', // New Entry Form (new page)
@@ -51,6 +51,21 @@ class Bricks_Form_Data_Manager
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_init', array($this, 'handle_download'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_styles'));
+
+        // Add token generation hook for debugging
+        add_action('wp_head', array($this, 'debug_token_generation'));
+    }
+
+    /**
+     * Debug token generation in console
+     */
+    public function debug_token_generation()
+    {
+        if (current_user_can('manage_options')) {
+            echo '<script>
+            console.log("Bricks Form Data Manager v' . $this->version . ' loaded");
+            </script>';
+        }
     }
 
     /**
@@ -90,8 +105,24 @@ class Bricks_Form_Data_Manager
      */
     private function get_xls_file_path($form_id)
     {
-        $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'submissions.xls';
+        $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'motodinamiki.xls';
         return $this->data_dir . '/' . $filename;
+    }
+
+    /**
+     * Get token field ID based on form ID
+     */
+    private function get_token_field_id($form_id)
+    {
+        // Map form IDs to their respective token field IDs
+        $token_fields = array(
+            'rwffis' => 'hkxzqe',
+            'xaiama' => 'ftmsoi',
+            'dfejuq' => 'plqrnx',
+            'zqowog' => 'sdxbvh'
+        );
+
+        return isset($token_fields[$form_id]) ? $token_fields[$form_id] : '';
     }
 
     /**
@@ -106,10 +137,9 @@ class Bricks_Form_Data_Manager
 
         // Debug: Log form ID and all fields
         error_log('Form submission received. Form ID: ' . $form_id);
-        error_log('All form fields: ' . print_r($fields, true));
 
         if (empty($form_id) || !isset($this->form_configs[$form_id])) {
-            $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'submissions.xls';
+            $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'motodinamiki.xls';
             error_log('Unknown form ID: ' . $form_id . '. Using default file: ' . $filename);
         } else {
             $filename = $this->form_configs[$form_id];
@@ -119,7 +149,10 @@ class Bricks_Form_Data_Manager
         // Get the appropriate XLS file for this form
         $xls_file = $this->get_xls_file_path($form_id);
 
-        // Regular form submission - CAPTURE ENTRY ID
+        // Get token field ID for this form
+        $token_field_id = $this->get_token_field_id($form_id);
+
+        // Regular form submission - CAPTURE ENTRY ID AND TOKEN
         $data = array(
             'entry_id' => isset($fields['form-field-ehvmdc']) ? sanitize_text_field($fields['form-field-ehvmdc']) : '',
             'timestamp' => current_time('Y-m-d H:i:s'),
@@ -129,10 +162,39 @@ class Bricks_Form_Data_Manager
             'email_consent' => 'No',
             'phone_sms_consent' => 'No',
             'mail_consent' => 'No',
-            'terms_accepted' => 'No'
+            'terms_accepted' => 'No',
+            'token' => '' // Initialize token field
         );
 
-        error_log('Processing submission for email: ' . $data['email'] . ' with entry ID: ' . $data['entry_id'] . ' to file: ' . basename($xls_file));
+        // Capture token if the field exists for this form
+        if ($token_field_id && isset($fields['form-field-' . $token_field_id])) {
+            $data['token'] = sanitize_text_field($fields['form-field-' . $token_field_id]);
+            error_log('Token captured from form field: ' . $data['token'] . ' from field: form-field-' . $token_field_id);
+        } else {
+            // Check if token is in other possible field names
+            $possible_token_fields = array(
+                'form-field-hkxzqe',  // rwffis form
+                'form-field-ftmsoi',  // xaiama form
+                'form-field-plqrnx',  // dfejuq form
+                'form-field-sdxbvh'   // zqowog form
+            );
+
+            foreach ($possible_token_fields as $field_name) {
+                if (isset($fields[$field_name]) && !empty($fields[$field_name])) {
+                    $data['token'] = sanitize_text_field($fields[$field_name]);
+                    error_log('Token captured from alternative field: ' . $data['token'] . ' from field: ' . $field_name);
+                    break;
+                }
+            }
+
+            // If still no token, generate one (fallback)
+            if (empty($data['token'])) {
+                $data['token'] = 'token_' . substr(wp_generate_password(8, false), 0, 8);
+                error_log('No token found in form fields. Generated fallback token: ' . $data['token']);
+            }
+        }
+
+        error_log('Processing submission for email: ' . $data['email'] . ' with entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' to file: ' . basename($xls_file));
 
         // Helper function to get radio button value
         function get_radio_value($field_value)
@@ -239,8 +301,17 @@ class Bricks_Form_Data_Manager
                 $existing_data = array();
             }
         } else {
-            // Default headers if file doesn't exist
-            $headers = array('Entry ID', 'Timestamp', 'Email', 'Phone', 'Newsletter Consent', 'E-Mail Consent', 'Phone/SMS Consent', 'Mail Consent', 'Terms Accepted');
+            // Default headers if file doesn't exist (including Token)
+            $headers = array('Entry ID', 'Timestamp', 'Email', 'Phone', 'Newsletter Consent', 'E-Mail Consent', 'Phone/SMS Consent', 'Mail Consent', 'Terms Accepted', 'Token');
+        }
+
+        // If file exists but doesn't have Token column, add it
+        if ($file_exists && count($headers) == 9) {
+            $headers[] = 'Token';
+            // Add empty token value to existing data
+            foreach ($existing_data as &$row) {
+                $row[] = '';
+            }
         }
 
         $updated = false;
@@ -253,7 +324,7 @@ class Bricks_Form_Data_Manager
                 $existing_email = strtolower(trim($row[2]));
                 if ($existing_email === $submission_email) {
                     // Update existing entry - use new entry ID from form
-                    $existing_data[$index] = array(
+                    $updated_row = array(
                         $data['entry_id'], // Use the NEW entry ID from current submission
                         $data['timestamp'],
                         $data['email'],
@@ -264,8 +335,18 @@ class Bricks_Form_Data_Manager
                         $data['mail_consent'],
                         $data['terms_accepted']
                     );
+
+                    // Add token (index 9 if we have token column)
+                    if (count($headers) > 9) {
+                        // Keep existing token if available, otherwise use new one
+                        $updated_row[] = isset($row[9]) && !empty($row[9]) ? $row[9] : $data['token'];
+                    } else {
+                        $updated_row[] = $data['token'];
+                    }
+
+                    $existing_data[$index] = $updated_row;
                     $updated = true;
-                    error_log('Updated existing entry for email: ' . $submission_email . ' with new entry ID: ' . $data['entry_id'] . ' in file: ' . basename($xls_file));
+                    error_log('Updated existing entry for email: ' . $submission_email . ' with new entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' in file: ' . basename($xls_file));
                     break;
                 }
             }
@@ -273,7 +354,7 @@ class Bricks_Form_Data_Manager
 
         // If not updated, add as new entry
         if (!$updated) {
-            $existing_data[] = array(
+            $new_row = array(
                 $data['entry_id'],
                 $data['timestamp'],
                 $data['email'],
@@ -282,9 +363,11 @@ class Bricks_Form_Data_Manager
                 $data['email_consent'],
                 $data['phone_sms_consent'],
                 $data['mail_consent'],
-                $data['terms_accepted']
+                $data['terms_accepted'],
+                $data['token']
             );
-            error_log('Added NEW entry for email: ' . $submission_email . ' with entry ID: ' . $data['entry_id'] . ' to file: ' . basename($xls_file));
+            $existing_data[] = $new_row;
+            error_log('Added NEW entry for email: ' . $submission_email . ' with entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' to file: ' . basename($xls_file));
         }
 
         // Write all data back to XLS
@@ -379,9 +462,9 @@ class Bricks_Form_Data_Manager
     {
         // Get file information for both files
         $files_info = array(
-            'submissions.xls' => array(
-                'name' => 'submissions.xls',
-                'path' => $this->data_dir . '/submissions.xls',
+            'motodinamiki.xls' => array(
+                'name' => 'motodinamiki.xls',
+                'path' => $this->data_dir . '/motodinamiki.xls',
                 'label' => 'Original Forms Data',
                 'forms' => 'Forms: rwffis, xaiama'
             ),
@@ -673,6 +756,9 @@ class Bricks_Form_Data_Manager
                     } elseif ($cellIndex == 8) { // Terms Accepted column
                         $class = (trim($cellValue) === 'Yes') ? 'ys-consent-yes' : 'ys-consent-no';
                         echo '<td class="' . $class . '">' . esc_html($cellValue) . '</td>';
+                    } elseif ($cellIndex == 9) { // Token column
+                        $display_cell = strlen($cellValue) > 20 ? substr($cellValue, 0, 20) . '...' : $cellValue;
+                        echo '<td title="' . esc_attr($cellValue) . '"><code>' . esc_html($display_cell) . '</code></td>';
                     } else {
                         $display_cell = strlen($cellValue) > 50 ? substr($cellValue, 0, 50) . '...' : $cellValue;
                         echo '<td title="' . esc_attr($cellValue) . '">' . esc_html($display_cell) . '</td>';
@@ -703,7 +789,7 @@ class Bricks_Form_Data_Manager
                 wp_die('Unauthorized access');
             }
 
-            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'submissions.xls';
+            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'motodinamiki.xls';
             $file_path = $this->data_dir . '/' . $filename;
 
             if (file_exists($file_path)) {
@@ -727,7 +813,7 @@ class Bricks_Form_Data_Manager
                 wp_die('Unauthorized access');
             }
 
-            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'submissions.xls';
+            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'motodinamiki.xls';
             $file_path = $this->data_dir . '/' . $filename;
 
             if (file_exists($file_path)) {
