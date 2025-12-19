@@ -197,7 +197,7 @@ class Bricks_Form_Data_Manager
             }
         }
 
-        error_log('Processing submission for email: ' . $data['email'] . ' with entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' to file: ' . basename($xls_file));
+        error_log('Processing submission for email: ' . $data['email'] . ' with entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' to file: ' . basename($xlsx_file));
 
         // Helper function to get radio button value
         function get_radio_value($field_value)
