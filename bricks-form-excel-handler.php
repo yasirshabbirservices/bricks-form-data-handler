@@ -14,20 +14,23 @@
 // Prevent direct access
 if (!defined('ABSPATH')) exit;
 
+// Load PhpSpreadsheet library
+require_once __DIR__ . '/autoload.php';
+
 class Bricks_Form_Data_Manager
 {
     private $data_dir;
     private $version = '2.11.0';
 
-    // Form configurations - Map form IDs to their respective XLS files
+    // Form configurations - Map form IDs to their respective XLSX files
     private $form_configs = array(
         // Original forms (page 1)
-        'rwffis' => 'motodinamiki.xls', // New Entry Form (original)
-        'xaiama' => 'motodinamiki.xls', // Update Entry Form (original)
+        'rwffis' => 'motodinamiki.xlsx', // New Entry Form (original)
+        'xaiama' => 'motodinamiki.xlsx', // Update Entry Form (original)
 
         // New forms (page 2)
-        'dfejuq' => 'motodiktio.xls', // New Entry Form (new page)
-        'zqowog' => 'motodiktio.xls', // Update Entry Form (new page)
+        'dfejuq' => 'motodiktio.xlsx', // New Entry Form (new page)
+        'zqowog' => 'motodiktio.xlsx', // Update Entry Form (new page)
     );
 
     public function __construct()
@@ -95,17 +98,17 @@ class Bricks_Form_Data_Manager
      */
     private function protect_directory()
     {
-        $htaccess_content = "# Protect form submission files\nOrder Deny,Allow\nDeny from all\n<Files *.xls>\nAllow from all\n</Files>\n<Files *.xml>\nAllow from all\n</Files>\n<Files *.csv>\nAllow from all\n</Files>";
+        $htaccess_content = "# Protect form submission files\nOrder Deny,Allow\nDeny from all\n<Files *.xlsx>\nAllow from all\n</Files>\n<Files *.xls>\nAllow from all\n</Files>\n<Files *.xml>\nAllow from all\n</Files>\n<Files *.csv>\nAllow from all\n</Files>";
         file_put_contents($this->data_dir . '/.htaccess', $htaccess_content);
         file_put_contents($this->data_dir . '/index.php', '<?php // Silence is golden');
     }
 
     /**
-     * Get XLS file path based on form ID
+     * Get XLSX file path based on form ID
      */
-    private function get_xls_file_path($form_id)
+    private function get_xlsx_file_path($form_id)
     {
-        $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'motodinamiki.xls';
+        $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'motodinamiki.xlsx';
         return $this->data_dir . '/' . $filename;
     }
 
@@ -139,15 +142,15 @@ class Bricks_Form_Data_Manager
         error_log('Form submission received. Form ID: ' . $form_id);
 
         if (empty($form_id) || !isset($this->form_configs[$form_id])) {
-            $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'motodinamiki.xls';
+            $filename = isset($this->form_configs[$form_id]) ? $this->form_configs[$form_id] : 'motodinamiki.xlsx';
             error_log('Unknown form ID: ' . $form_id . '. Using default file: ' . $filename);
         } else {
             $filename = $this->form_configs[$form_id];
             error_log('Form ID recognized: ' . $form_id . '. Using file: ' . $filename);
         }
 
-        // Get the appropriate XLS file for this form
-        $xls_file = $this->get_xls_file_path($form_id);
+        // Get the appropriate XLSX file for this form
+        $xlsx_file = $this->get_xlsx_file_path($form_id);
 
         // Get token field ID for this form
         $token_field_id = $this->get_token_field_id($form_id);
@@ -256,53 +259,49 @@ class Bricks_Form_Data_Manager
         // Debug: Log final data
         error_log('Final data to save: ' . print_r($data, true));
 
-        $this->save_to_xls($data, $xls_file);
+        $this->save_to_xlsx($data, $xlsx_file);
     }
 
     /**
-     * Save data to XLS file with duplicate prevention based on email
+     * Save data to XLSX file with duplicate prevention based on email
      */
-    private function save_to_xls($data, $xls_file)
+    private function save_to_xlsx($data, $xlsx_file)
     {
-        $file_exists = file_exists($xls_file);
+        $file_exists = file_exists($xlsx_file);
         $existing_data = array();
-        $headers = array();
+        $headers = array('Entry ID', 'Timestamp', 'Email', 'Phone', 'Newsletter Consent', 'E-Mail Consent', 'Phone/SMS Consent', 'Mail Consent', 'Terms Accepted', 'Token');
 
         // Read existing data if file exists
-        if ($file_exists && filesize($xls_file) > 0) {
+        if ($file_exists && filesize($xlsx_file) > 0) {
             try {
-                // Read the XLS file as XML
-                $xml_content = file_get_contents($xls_file);
-                $xml = simplexml_load_string($xml_content);
-                if ($xml && isset($xml->Worksheet->Table->Row)) {
-                    $rows = $xml->Worksheet->Table->Row;
-
-                    // Get headers from first row
-                    $rowIndex = 0;
-                    foreach ($rows as $row) {
-                        if ($rowIndex == 0) {
-                            // Header row
-                            foreach ($row->Cell as $cell) {
-                                $headers[] = (string)$cell->Data;
-                            }
-                        } else {
-                            // Data rows
-                            $row_data = array();
-                            foreach ($row->Cell as $cell) {
-                                $row_data[] = (string)$cell->Data;
-                            }
-                            $existing_data[] = $row_data;
-                        }
-                        $rowIndex++;
+                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx');
+                $spreadsheet = $reader->load($xlsx_file);
+                $worksheet = $spreadsheet->getActiveSheet();
+                
+                // Get the highest row number
+                $highestRow = $worksheet->getHighestRow();
+                
+                // Read headers from first row
+                $headers = array();
+                $highestColumn = $worksheet->getHighestColumn();
+                $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
+                
+                for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                    $headers[] = $worksheet->getCellByColumnAndRow($col, 1)->getValue();
+                }
+                
+                // Read data rows (skip header row 1)
+                for ($row = 2; $row <= $highestRow; $row++) {
+                    $row_data = array();
+                    for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                        $row_data[] = $worksheet->getCellByColumnAndRow($col, $row)->getValue();
                     }
+                    $existing_data[] = $row_data;
                 }
             } catch (Exception $e) {
-                error_log('Error reading XLS file: ' . $e->getMessage());
+                error_log('Error reading XLSX file: ' . $e->getMessage());
                 $existing_data = array();
             }
-        } else {
-            // Default headers if file doesn't exist (including Token)
-            $headers = array('Entry ID', 'Timestamp', 'Email', 'Phone', 'Newsletter Consent', 'E-Mail Consent', 'Phone/SMS Consent', 'Mail Consent', 'Terms Accepted', 'Token');
         }
 
         // If file exists but doesn't have Token column, add it
@@ -346,7 +345,7 @@ class Bricks_Form_Data_Manager
 
                     $existing_data[$index] = $updated_row;
                     $updated = true;
-                    error_log('Updated existing entry for email: ' . $submission_email . ' with new entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' in file: ' . basename($xls_file));
+                    error_log('Updated existing entry for email: ' . $submission_email . ' with new entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' in file: ' . basename($xlsx_file));
                     break;
                 }
             }
@@ -367,76 +366,68 @@ class Bricks_Form_Data_Manager
                 $data['token']
             );
             $existing_data[] = $new_row;
-            error_log('Added NEW entry for email: ' . $submission_email . ' with entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' to file: ' . basename($xls_file));
+            error_log('Added NEW entry for email: ' . $submission_email . ' with entry ID: ' . $data['entry_id'] . ' token: ' . $data['token'] . ' to file: ' . basename($xlsx_file));
         }
 
-        // Write all data back to XLS
-        $this->write_xls_file($headers, $existing_data, $xls_file);
+        // Write all data back to XLSX
+        $this->write_xlsx_file($headers, $existing_data, $xlsx_file);
 
         return true;
     }
 
     /**
-     * Write data to XLS (Excel 2003 XML) file - SIMPLIFIED VERSION
+     * Write data to XLSX file using PhpSpreadsheet
      */
-    private function write_xls_file($headers, $data, $xls_file)
+    private function write_xlsx_file($headers, $data, $xlsx_file)
     {
-        // Simplified XLS/XML format without unnecessary namespaces
-        $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-        $xml .= '
-<?mso-application progid="Excel.Sheet"?>' . "\n";
-        $xml .= '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"' . "\n";
-        $xml .= ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' . "\n";
-        $xml .= '<Styles>' . "\n";
-        $xml .= '<Style ss:ID="Default" ss:Name="Normal">
-        ' . "\n";
-        $xml .= '<Alignment ss:Vertical="Bottom"/>' . "\n";
-        $xml .= '<Borders/>' . "\n";
-        $xml .= '<Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000"/>' . "\n";
-        $xml .= '<Interior/>' . "\n";
-        $xml .= '<NumberFormat/>' . "\n";
-        $xml .= '<Protection/>' . "\n";
-        $xml .= '
-        </Style>' . "\n";
-        $xml .= '<Style ss:ID="Header">
-        ' . "\n";
-        $xml .= '<Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>' . "\n";
-        $xml .= '
-        </Style>' . "\n";
-        $xml .= '</Styles>' . "\n";
+        try {
+            // Create new Spreadsheet object
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $worksheet = $spreadsheet->getActiveSheet();
+            $worksheet->setTitle('Form Submissions');
 
-        // Create Worksheet
-        $xml .= '<Worksheet ss:Name="Form Submissions">' . "\n";
-        $xml .= '<Table>' . "\n";
-
-        // Add header row
-        $xml .= '<Row ss:StyleID="Header">' . "\n";
-        foreach ($headers as $header) {
-            $xml .= '<Cell><Data ss:Type="String">' . htmlspecialchars($header, ENT_XML1, 'UTF-8') . '</Data></Cell>
-                ' . "\n";
-        }
-        $xml .= '</Row>' . "\n";
-
-        // Add data rows
-        foreach ($data as $row) {
-            $xml .= '<Row>' . "\n";
-            foreach ($row as $cellValue) {
-                $xml .= '<Cell><Data ss:Type="String">' . htmlspecialchars($cellValue, ENT_XML1, 'UTF-8') . '</Data>
-                </Cell>' . "\n";
+            // Write headers
+            $col = 1;
+            foreach ($headers as $header) {
+                $worksheet->setCellValueByColumnAndRow($col, 1, $header);
+                $col++;
             }
-            $xml .= '</Row>' . "\n";
+
+            // Style header row
+            $headerStyle = $worksheet->getStyle('A1:' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers)) . '1');
+            $headerStyle->getFont()->setBold(true);
+            $headerStyle->getFill()
+                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                ->getStartColor()->setARGB('FFE0E0E0');
+
+            // Write data rows
+            $row = 2;
+            foreach ($data as $rowData) {
+                $col = 1;
+                foreach ($rowData as $cellValue) {
+                    $worksheet->setCellValueByColumnAndRow($col, $row, $cellValue);
+                    $col++;
+                }
+                $row++;
+            }
+
+            // Auto-size columns
+            foreach (range(1, count($headers)) as $col) {
+                $columnLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+                $worksheet->getColumnDimension($columnLetter)->setAutoSize(true);
+            }
+
+            // Save to file
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save($xlsx_file);
+            chmod($xlsx_file, 0644);
+
+            error_log('XLSX file saved successfully with ' . count($data) . ' entries to: ' . basename($xlsx_file));
+            return true;
+        } catch (Exception $e) {
+            error_log('Error writing XLSX file: ' . $e->getMessage());
+            return false;
         }
-
-        $xml .= '</Table>' . "\n";
-        $xml .= '</Worksheet>' . "\n";
-        $xml .= '</Workbook>';
-
-        // Save to file
-        file_put_contents($xls_file, $xml);
-        chmod($xls_file, 0644);
-
-        error_log('XLS file saved successfully with ' . count($data) . ' entries to: ' . basename($xls_file));
-        return true;
     }
 
     /**
@@ -462,15 +453,15 @@ class Bricks_Form_Data_Manager
     {
         // Get file information for both files
         $files_info = array(
-            'motodinamiki.xls' => array(
-                'name' => 'motodinamiki.xls',
-                'path' => $this->data_dir . '/motodinamiki.xls',
+            'motodinamiki.xlsx' => array(
+                'name' => 'motodinamiki.xlsx',
+                'path' => $this->data_dir . '/motodinamiki.xlsx',
                 'label' => 'Original Forms Data',
                 'forms' => 'Forms: rwffis, xaiama'
             ),
-            'motodiktio.xls' => array(
-                'name' => 'motodiktio.xls',
-                'path' => $this->data_dir . '/motodiktio.xls',
+            'motodiktio.xlsx' => array(
+                'name' => 'motodiktio.xlsx',
+                'path' => $this->data_dir . '/motodiktio.xlsx',
                 'label' => 'New Page Forms Data',
                 'forms' => 'Forms: dfejuq, zqowog'
             )
@@ -528,24 +519,20 @@ class Bricks_Form_Data_Manager
 
                         if ($file_exists) {
                             try {
-                                // Read XLS file as XML to count rows
-                                $xml_content = file_get_contents($file_info['path']);
-                                // Suppress warnings for namespace issues - they don't affect functionality
-                                $xml = @simplexml_load_string($xml_content);
-                                if ($xml && isset($xml->Worksheet->Table->Row)) {
-                                    $rows = $xml->Worksheet->Table->Row;
-                                    $total_submissions = count($rows) - 1; // Subtract header row
+                                // Read XLSX file using PhpSpreadsheet to count rows
+                                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx');
+                                $spreadsheet = $reader->load($file_info['path']);
+                                $worksheet = $spreadsheet->getActiveSheet();
+                                
+                                $highestRow = $worksheet->getHighestRow();
+                                $total_submissions = $highestRow - 1; // Subtract header row
 
-                                    if ($total_submissions > 0) {
-                                        // Get last row (excluding header)
-                                        $lastRow = $rows[count($rows) - 1];
-                                        if ($lastRow->Cell[1]->Data) {
-                                            $latest_submission = (string)$lastRow->Cell[1]->Data;
-                                        }
-                                    }
+                                if ($total_submissions > 0) {
+                                    // Get latest timestamp from column 2 (Timestamp column)
+                                    $latest_submission = $worksheet->getCellByColumnAndRow(2, $highestRow)->getValue();
                                 }
                             } catch (Exception $e) {
-                                error_log('Error reading XLS file: ' . $e->getMessage());
+                                error_log('Error reading XLSX file: ' . $e->getMessage());
                             }
 
                             $file_size = size_format(filesize($file_info['path']));
@@ -677,51 +664,46 @@ class Bricks_Form_Data_Manager
     }
 
     /**
-     * Show data preview from XLS - SIMPLIFIED READING
+     * Show data preview from XLSX file
      */
-    private function show_preview($xls_file)
+    private function show_preview($xlsx_file)
     {
-        if (!file_exists($xls_file)) {
+        if (!file_exists($xlsx_file)) {
             echo '<div class="ys-empty-state" style="padding: 32px;"><p>No submissions to preview.</p></div>';
             return;
         }
 
         try {
-            // Read XLS file content
-            $xml_content = file_get_contents($xls_file);
+            // Read XLSX file using PhpSpreadsheet
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx');
+            $spreadsheet = $reader->load($xlsx_file);
+            $worksheet = $spreadsheet->getActiveSheet();
+            
+            $highestRow = $worksheet->getHighestRow();
+            $highestColumn = $worksheet->getHighestColumn();
+            $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
 
-            // Parse XML using DOMDocument which is more forgiving
-            $dom = new DOMDocument();
-            // Suppress warnings for namespace issues
-            @$dom->loadXML($xml_content);
-
-            $rows = $dom->getElementsByTagName('Row');
-            $total_rows = $rows->length;
-
-            if ($total_rows <= 1) { // Only header row
+            if ($highestRow <= 1) { // Only header row
                 echo '<div class="ys-empty-state" style="padding: 32px;"><p>No submissions to preview.</p></div>';
                 return;
             }
 
             // Get headers from first row
             $headers = array();
-            $firstRow = $rows->item(0);
-            if ($firstRow) {
-                $cells = $firstRow->getElementsByTagName('Cell');
-                foreach ($cells as $cell) {
-                    $dataElements = $cell->getElementsByTagName('Data');
-                    if ($dataElements->length > 0) {
-                        $headers[] = $dataElements->item(0)->nodeValue;
-                    }
-                }
+            for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                $headers[] = $worksheet->getCellByColumnAndRow($col, 1)->getValue();
             }
 
             // Get last 10 rows (excluding header)
-            $start = max(1, $total_rows - 10); // Start from row 1 (after header)
+            $start = max(2, $highestRow - 9); // Start from row 2 (after header)
             $recent_rows = array();
-
-            for ($i = $start; $i < $total_rows; $i++) {
-                $recent_rows[] = $rows->item($i);
+            
+            for ($row = $start; $row <= $highestRow; $row++) {
+                $row_data = array();
+                for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                    $row_data[] = $worksheet->getCellByColumnAndRow($col, $row)->getValue();
+                }
+                $recent_rows[] = $row_data;
             }
 
             $recent_rows = array_reverse($recent_rows);
@@ -732,17 +714,10 @@ class Bricks_Form_Data_Manager
             }
             echo '</tr></thead><tbody>';
 
-            foreach ($recent_rows as $row) {
+            foreach ($recent_rows as $row_data) {
                 echo '<tr>';
                 $cellIndex = 0;
-                $cells = $row->getElementsByTagName('Cell');
-                foreach ($cells as $cell) {
-                    $dataElements = $cell->getElementsByTagName('Data');
-                    $cellValue = '';
-                    if ($dataElements->length > 0) {
-                        $cellValue = $dataElements->item(0)->nodeValue;
-                    }
-
+                foreach ($row_data as $cellValue) {
                     // Apply special styling for consent columns
                     if ($cellIndex == 4) { // Newsletter Consent column
                         if (trim($cellValue) === 'I do not agree') {
@@ -771,7 +746,7 @@ class Bricks_Form_Data_Manager
             echo '</tbody></table>';
         } catch (Exception $e) {
             echo '<div class="ys-empty-state" style="padding: 32px;"><p>Error reading data file.</p></div>';
-            error_log('Error reading XLS for preview: ' . $e->getMessage());
+            error_log('Error reading XLSX for preview: ' . $e->getMessage());
         }
     }
 
@@ -789,12 +764,12 @@ class Bricks_Form_Data_Manager
                 wp_die('Unauthorized access');
             }
 
-            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'motodinamiki.xls';
+            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'motodinamiki.xlsx';
             $file_path = $this->data_dir . '/' . $filename;
 
             if (file_exists($file_path)) {
-                header('Content-Type: application/vnd.ms-excel');
-                header('Content-Disposition: attachment; filename="' . basename($file_path, '.xls') . '-' . date('Y-m-d-His') . '.xls"');
+                header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                header('Content-Disposition: attachment; filename="' . basename($file_path, '.xlsx') . '-' . date('Y-m-d-His') . '.xlsx"');
                 header('Pragma: no-cache');
                 header('Expires: 0');
                 readfile($file_path);
@@ -813,7 +788,7 @@ class Bricks_Form_Data_Manager
                 wp_die('Unauthorized access');
             }
 
-            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'motodinamiki.xls';
+            $filename = isset($_POST['file']) ? sanitize_text_field($_POST['file']) : 'motodinamiki.xlsx';
             $file_path = $this->data_dir . '/' . $filename;
 
             if (file_exists($file_path)) {
