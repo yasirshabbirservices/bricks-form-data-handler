@@ -20,7 +20,7 @@ require_once __DIR__ . '/autoload.php';
 class Bricks_Form_Data_Manager
 {
     private $data_dir;
-    private $version = '2.11.0';
+    private $version = '3.0.0';
 
     // Form configurations - Map form IDs to their respective XLSX files
     private $form_configs = array(
