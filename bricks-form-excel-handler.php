@@ -4,7 +4,7 @@
  * Plugin Name: Bricks Form Data Manager
  * Plugin URI: https://yasirshabbir.com
  * Description: Professional form submission handler for Bricks Builder - Saves data to Excel files for multiple forms
- * Version: 2.11.0
+ * Version: 3.0.0
  * Author: Yasir Shabbir
  * Author URI: https://yasirshabbir.com
  * License: GPL v2 or later
